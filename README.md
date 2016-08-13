@@ -1,5 +1,10 @@
 # prefetch_generator
 
+Simple package that makes your generator work in background thread.
+
+
+[Quick usage example (ipython notebook)](https://github.com/justheuristic/prefetch_generator/blob/master/example.ipynb)
+
 
 ### Install:
  *  ```pip install prefetch_generator```
@@ -7,13 +12,7 @@
  *  Works with both python2 and python3 (pip3 install)
 
 
-Simple package that makes your generator work in background thread.
-
-
-`based on http://stackoverflow.com/questions/7323664/python-generator-pre-fetch`
-
-Quick usage example (ipython notebook) - https://github.com/justheuristic/prefetch_generator/blob/master/example.ipynb
-
+### Description:
 
 This is a single-function package that transforms arbitrary generator into a background-thead generator that prefetches several batches of data in a parallel background thead.
 
@@ -22,6 +21,10 @@ This is useful if you have a computationally heavy process (CPU or GPU) that ite
 By default these two processes will constantly wait for one another to finish. If you make generator work in prefetch mode (see examples below), they will work in parallel, potentially saving you your GPU time.
 
 We personally use the prefetch generator when iterating minibatches of data for deep learning with tensorflow and theano ( lasagne, blocks, raw, etc.).
+
+`based on http://stackoverflow.com/questions/7323664/python-generator-pre-fetch`
+
+### Usage:
 
 This package contains two objects
  - BackgroundGenerator(any_other_generator[,max_prefetch = something])

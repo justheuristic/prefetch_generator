@@ -9,6 +9,8 @@ By default these two processes will constantly wait for one another to finish. I
 
 We personally use the prefetch generator when iterating minibatches of data for deep learning with tensorflow and theano ( lasagne, blocks, raw, etc.).
 
+Quick usage example (ipython notebook) - https://github.com/justheuristic/prefetch_generator/blob/master/example.ipynb
+
 This package contains two objects
  - BackgroundGenerator(any_other_generator[,max_prefetch = something])
  - @background([max_prefetch=somethind]) decorator

@@ -1,4 +1,12 @@
 # prefetch_generator
+
+
+### Install:
+ *  ```pip install prefetch_generator```
+ *  No dependencies apart from standard libraries
+ *  Works with both python2 and python3 (pip3 install)
+
+
 Simple package that makes your generator work in background thread.
 
 

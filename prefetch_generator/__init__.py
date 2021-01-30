@@ -75,6 +75,7 @@ class BackgroundGenerator(threading.Thread):
         self.generator = generator
         self.daemon = True
         self.start()
+        self.exhausted = False
 
     def run(self):
         for item in self.generator:
@@ -82,10 +83,13 @@ class BackgroundGenerator(threading.Thread):
         self.queue.put(None)
 
     def next(self):
-        next_item = self.queue.get()
-        if next_item is None:
+        if self.exhausted:
             raise StopIteration
-        return next_item
+        else:
+            next_item = self.queue.get()
+            if next_item is None:
+                raise StopIteration
+            return next_item
 
     # Python 3 compatibility
     def __next__(self):

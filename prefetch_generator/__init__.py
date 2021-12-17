@@ -49,7 +49,7 @@ else:
 
 
 class BackgroundGenerator(threading.Thread):
-    def __init__(self, generator, max_prefetch=1):
+    def __init__(self, generator, max_prefetch=1, preprocess_func=None):
         """
 
         This function transforms generator into a background-thead generator.
@@ -73,12 +73,14 @@ class BackgroundGenerator(threading.Thread):
         threading.Thread.__init__(self)
         self.queue = Queue.Queue(max_prefetch)
         self.generator = generator
+        self.preprocess_func = preprocess_func
         self.daemon = True
         self.start()
         self.exhausted = False
 
     def run(self):
         for item in self.generator:
+            item = item if self.preprocess_func is None else self.preprocess_func(item)
             self.queue.put(item)
         self.queue.put(None)
 

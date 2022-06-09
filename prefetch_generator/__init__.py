@@ -1,111 +1,147 @@
 """
-#based on http://stackoverflow.com/questions/7323664/python-generator-pre-fetch
+Based on http://stackoverflow.com/questions/7323664/python-generator-pre-fetch
 
-This is a single-function package that transforms arbitrary generator into a background-thead generator that prefetches several batches of data in a parallel background thead.
+This is a single-function package that makes it possible to transform any generator into a `BackgroundGenerator` which computes any number of elements from the generator ahead, in a background thread.
 
-This is useful if you have a computationally heavy process (CPU or GPU) that iteratively processes minibatches from the generator while the generator consumes some other resource (disk IO / loading from database / more CPU if you have unused cores). 
+It is quite lightweight, but not entirely weightless.
 
-By default these two processes will constantly wait for one another to finish. If you make generator work in prefetch mode (see examples below), they will work in parallel, potentially saving you your GPU time.
+The `BackgroundGenerator` is most useful when you have a GIL releasing task which might take a long time to complete (e.g. Disk I/O, Web Requests, pure C functions, GPU processing, ...), and another task which takes a similar amount of time, but is dependent on the results of the first task (e.g. Computationally intensive processing of data loaded from disk).
 
-We personally use the prefetch generator when iterating minibatches of data for deep learning with tensorflow and theano ( lasagne, blocks, raw, etc.).
+Normally these two tasks will constantly wait for one another to finish. If you make one of these tasks a `BackgroundGenerator` (see examples below), they will work in parallel, potentially saving up to 50% of execution time (definitely less in practice).
+
+We personally use the `BackgroundGenerator` when iterating over minibatches of data for deep learning with tensorflow and theano ( lasagne, blocks, raw, etc.).
 
 Quick usage example (ipython notebook) - https://github.com/justheuristic/prefetch_generator/blob/master/example.ipynb
 
-This package contains two objects
- - BackgroundGenerator(any_other_generator[,max_prefetch = something])
- - @background([max_prefetch=somethind]) decorator
+This package contains two objects:
+ - The Class     `BackgroundGenerator(generator [,max_prefetch=1])`
+ - The decorator `@prefetch([max_prefetch=1])`
 
 the usage is either
 
-#for batch in BackgroundGenerator(my_minibatch_iterator):
-#    doit()
+#for item in BackgroundGenerator(my_generator):
+#    do_stuff(item)
 
 or
 
-#@background()
-#def iterate_minibatches(some_param):
+#@prefetch()
+#def my_generator(some_param):
 #    while True:
 #        X = read_heavy_file()
-#        X = do_helluva_math(X)
-#        y = wget_from_pornhub()
-#        do_pretty_much_anything()
-#        yield X_batch, y_batch
+#        y = wget_from_cornhub()
+#        do_pretty_much_anything(some_param)
+#        yield X, y
 
 
-More details are written in the BackgroundGenerator doc
-help(BackgroundGenerator)
-
+More details are written in the `BackgroundGenerator` doc:
+See `help(BackgroundGenerator)`
 """
 
+__all__ = ['BackgroundGenerator', 'prefetch', 'background']
 
-
-import threading
-import sys
-
-if sys.version_info >= (3, 0):
-    import queue as Queue
+from sys import version_info as _py_version_info
+if _py_version_info >= (3, 0):
+    from queue import Queue
 else:
-    import Queue
+    from Queue import Queue
+from threading import Thread
+from functools import update_wrapper
 
 
-class BackgroundGenerator(threading.Thread):
+class BackgroundGenerator(Thread):
+    """
+    This Class computes the elements of a generator in a Background Thread.
+    
+    Since we're talking about Threading here, the usual safety and performance rules apply.
+    See https://docs.python.org/3/glossary.html#term-global-interpreter-lock for more information.
+    
+    "One thread runs Python, while N others sleep or await I/O." (https://opensource.com/article/17/4/grok-gil)
+    
+    The ideal use case is when either the generator or the main thread do GIL releasing work (e.g. File I/O, Web requests, ...), and the generator has no side effects on the rest of the program (e.g. no modifying of global variables).
+    """
     def __init__(self, generator, max_prefetch=1, preprocess_func=None):
         """
-
-        This function transforms generator into a background-thead generator.
-        :param generator: generator or genexp or any
-        It can be used with any minibatch generator.
-
-        It is quite lightweight, but not entirely weightless.
-        Using global variables inside generator is not recommended (may rise GIL and zero-out the benefit of having a background thread.)
-        The ideal use case is when everything it requires is store inside it and everything it outputs is passed through queue.
-
-        There's no restriction on doing weird stuff, reading/writing files, retrieving URLs [or whatever] wlilst iterating.
-
-        :param max_prefetch: defines, how many iterations (at most) can background generator keep stored at any moment of time.
-        Whenever there's already max_prefetch batches stored in queue, the background process will halt until one of these batches is dequeued.
-
-        !Default max_prefetch=1 is okay unless you deal with some weird file IO in your generator!
-
-        Setting max_prefetch to -1 lets it store as many batches as it can, which will work slightly (if any) faster, but will require storing
-        all batches in memory. If you use infinite generator with max_prefetch=-1, it will exceed the RAM size unless dequeued quickly enough.
+        Parameters
+        ----------
+        generator : generator or genexp or any
+            The generator to compute elements from in a background thread.
+        
+        max_prefetch : int, optional, default: 1
+            How many elements of the generator will be precomputed ahead at most.
+            If `max_prefetch` is <= 0, then the queue size is infinite.
+            When `max_prefetch` elements have been computed ahead, the background thread will simply wait for elements to be consumed by another thread.
+        
+        preprocess_func: callable, optional, deprecated
+            Function to call on the output of the generator before returning the element from the background thread.
+            Using this is not recommended, because using
+            `BackgroundGenerator(my_generator, 1, my_preprocessor)` is exactly the same as using
+            `BackgroundGenerator((my_preprocessor(item) for item in my_generator), 1)`,
+            or simply calling `my_preprocessor` before returning from `my_generator`, making this argument redundant.
+        
+        See Also
+        --------
+        prefetch : Decorator for wrapping a function which returns a generator with `BackgroundGenerator`.
+        background : alias for `prefetch`.
         """
-        threading.Thread.__init__(self)
-        self.queue = Queue.Queue(max_prefetch)
-        self.generator = generator
+        if preprocess_func is not None: # Deprecated.
+            self.run = self._run_with_preprocessor
+        super(BackgroundGenerator, self).__init__() # Python 2/3 compatibility
+        self.queue           = Queue(max_prefetch)
+        self.generator       = generator
         self.preprocess_func = preprocess_func
-        self.daemon = True
+        self.Continue  = True
+        self.daemon    = True
         self.start()
-        self.exhausted = False
-
+    
     def run(self):
-        for item in self.generator:
-            item = item if self.preprocess_func is None else self.preprocess_func(item)
-            self.queue.put(item)
-        self.queue.put(None)
+        try:
+            for item in self.generator: self.queue.put((True , item))
+        except Exception as e:          self.queue.put((False, e))
+        finally:                        self.queue.put((False, StopIteration))
+    
+    def _run_with_preprocessor(self):
+        "When a `preprocess_func` is passed to `__init__` this function replaces `run`. Deprecated."
+        func = self.preprocess_func
+        try:
+            for item in self.generator: self.queue.put((True , func(item)))
+        except Exception as e:          self.queue.put((False, e))
+        finally:                        self.queue.put((False, StopIteration))
 
     def next(self):
-        if self.exhausted:
-            raise StopIteration
-        else:
-            next_item = self.queue.get()
-            if next_item is None:
-                raise StopIteration
-            return next_item
+        if self.Continue:
+            success, next_item = self.queue.get()
+            if success: return next_item
+            else:
+                self.Continue = False
+                raise next_item
+        else: raise StopIteration
+    __next__ = next # Python 2/3 compatibility. Watch out, order matters!
+    
+    def __iter__(self): return self
 
-    # Python 3 compatibility
-    def __next__(self):
-        return self.next()
-
-    def __iter__(self):
-        return self
-
-#decorator
-class background:
-    def __init__(self, max_prefetch=1):
-        self.max_prefetch = max_prefetch
-    def __call__(self, gen):
-        def bg_generator(*args,**kwargs):
-            return BackgroundGenerator(gen(*args,**kwargs), max_prefetch=self.max_prefetch)
-        return bg_generator
-
+# Decorator
+def prefetch(max_prefetch=1):
+    """
+    Decorator for wrapping a function which returns a generator with `BackgroundGenerator`.
+    A new instance of `BackgroundGenerator` is created every time the decorated function is called.
+    
+    Parameters
+    ----------
+    max_prefetch : int, optional, default: 1
+            How many elements of the generator will be precomputed ahead at most.
+            If `max_prefetch` is <= 0, then the queue size is infinite.
+            When `max_prefetch` elements have been computed ahead, the background thread will simply wait for elements to be consumed by another thread.
+    
+    See Also
+    --------
+    BackgroundGenerator : Class which computes the elements of a generator in a Background Thread.
+    prefetch : alias for `background`.
+    background : alias for `prefetch`.
+    """
+    def decorator(generator):
+        def wrapper(*args,**kwargs):
+            return BackgroundGenerator(generator(*args,**kwargs), max_prefetch=max_prefetch)
+        update_wrapper(wrapper, generator)
+        return wrapper
+    return decorator
+background = prefetch # rename without breaking backwards compatibility

@@ -22,7 +22,7 @@ setup(
     url="https://github.com/justheuristic/prefetch_generator",
 
     # Choose your license
-    license='MIT',
+    license='The Unlicense',
     packages=find_packages(),
 
     classifiers=[
@@ -33,7 +33,7 @@ setup(
         'Topic :: Scientific/Engineering',
 
         # Pick your license as you wish (should match "license" above)
-        "License :: OSI Approved :: MIT License",
+        'License :: OSI Approved :: The Unlicense (Unlicense)',
 
         # Specify the Python versions you support here. In particular, ensure
         # that you indicate whether you support Python 2, Python 3 or both.
@@ -43,6 +43,8 @@ setup(
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
 
     ],
 
